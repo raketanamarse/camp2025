@@ -1,0 +1,3 @@
+docker tag echo-server raketanamarse/camp2025:echoserver
+docker push raketanamarse/camp2025:echoserver
+
