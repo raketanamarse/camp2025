@@ -1,0 +1,109 @@
+---
+- name: Install Docker and deploy containers with Nginx load balancer
+  hosts: all
+  become: yes
+
+  vars:
+    docker_gpg_key_url: https://download.docker.com/linux/ubuntu/gpg
+    docker_keyring_path: /etc/apt/keyrings/docker.asc
+    docker_repo_template: "deb [arch=amd64 signed-by={{ docker_keyring_path }}] https://download.docker.com/linux/ubuntu {{ ansible_facts.lsb.codename }} stable"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker GPG key
+      get_url:
+        url: "{{ docker_gpg_key_url }}"
+        dest: "{{ docker_keyring_path }}"
+        mode: '0644'
+
+    - name: Add Docker repository
+      copy:
+        content: "{{ docker_repo_template }}\n"
+        dest: /etc/apt/sources.list.d/docker.list
+        mode: '0644'
+
+    - name: Update apt cache after adding Docker repo
+      apt:
+        update_cache: yes
+
+    - name: Install Docker Engine and plugins
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Add current user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Log in to Docker Registry
+      docker_login:
+        registry_url: https://index.docker.io/v1/
+        username: "{{ docker_username }}"
+        password: "{{ docker_password }}"
+
+    - name: Run echoserver containers
+      docker_container:
+        name: "echoserver_{{ item }}"
+        image: raketanamarse/camp2025:echoserver
+        ports:
+          - "800{{ item }}:8000"
+        restart_policy: unless-stopped
+      loop: [1, 2, 3]
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+    
+    - name: Remove default Nginx site config
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove default.conf if exists
+      file:
+        path: /etc/nginx/conf.d/default.conf
+        state: absent
+      ignore_errors: yes
+
+    - name: Configure Nginx load balancer
+      template:
+        src: nginx_lb.conf.j2
+        dest: /etc/nginx/conf.d/load_balancer.conf
+      notify: Restart Nginx
+    
+    - name: Ensure Nginx is running
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
